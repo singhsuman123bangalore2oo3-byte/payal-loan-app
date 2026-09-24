@@ -47,14 +47,14 @@ class LoanApp(App):
 
         button = Button(
             text="CALCULATE EMI",
-            font_size=20
+            font_size=60
         )
         button.bind(on_press=self.calculate_emi)
         layout.add_widget(button)
 
         self.result = Label(
             text="Monthly EMI: ₹0",
-            font_size=22
+            font_size=60
         )
         layout.add_widget(self.result)
 
