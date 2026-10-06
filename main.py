@@ -1,10 +1,15 @@
 import os
 import re
+import json
+import urllib.request
+import urllib.error
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.metrics import dp, sp
 from kivy.storage.jsonstore import JsonStore
+from kivy.utils import platform
 
 from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
 from kivy.uix.boxlayout import BoxLayout
@@ -16,88 +21,369 @@ from kivy.uix.popup import Popup
 
 
 # =========================================================
-# BUTTON
+# WINDOW
 # =========================================================
 
-def make_button(text, height=55):
+Window.minimum_width = dp(320)
+Window.minimum_height = dp(520)
+
+if platform == "android":
+    Window.fullscreen = "auto"
+
+
+# =========================================================
+# COLORS
+# =========================================================
+
+BLUE = (0.04, 0.30, 0.65, 1)
+DARK_BLUE = (0.02, 0.12, 0.25, 1)
+
+WHITE = (1, 1, 1, 1)
+BLACK = (0.05, 0.05, 0.05, 1)
+
+LIGHT_BG = (0.94, 0.96, 1, 1)
+LIGHT_BLUE = (0.70, 0.85, 1, 1)
+
+GREEN = (0.10, 0.65, 0.25, 1)
+RED = (0.80, 0.15, 0.15, 1)
+ORANGE = (0.95, 0.55, 0.05, 1)
+GRAY = (0.45, 0.45, 0.45, 1)
+
+
+# =========================================================
+# UI HELPERS
+# =========================================================
+
+def make_button(text, height=56, color=BLUE):
     return Button(
         text=text,
         size_hint_y=None,
-        height=height,
-        font_size=17
+        height=dp(height),
+        font_size=sp(16),
+        background_normal="",
+        background_color=color,
+        color=WHITE
     )
 
 
+def make_input(hint="", password=False):
+    return TextInput(
+        hint_text=hint,
+        password=password,
+        multiline=False,
+        size_hint_y=None,
+        height=dp(52),
+        font_size=sp(16),
+        padding=[dp(12), dp(12)],
+        background_normal="",
+        background_color=WHITE,
+        foreground_color=BLACK
+    )
+
+
+def make_label(text="", size=17, bold=False, color=WHITE):
+    label = Label(
+        text=text,
+        font_size=sp(size),
+        bold=bold,
+        color=color,
+        size_hint_y=None,
+        height=dp(42),
+        halign="left",
+        valign="middle"
+    )
+
+    label.bind(
+        width=lambda obj, value:
+        setattr(
+            obj,
+            "text_size",
+            (value - dp(10), None)
+        )
+    )
+
+    return label
+
+
+def show_message(title, message):
+
+    content = BoxLayout(
+        orientation="vertical",
+        padding=dp(16),
+        spacing=dp(12)
+    )
+
+    label = Label(
+        text=message,
+        font_size=sp(16),
+        color=BLACK,
+        halign="center",
+        valign="middle"
+    )
+
+    label.bind(
+        size=lambda obj, value:
+        setattr(
+            obj,
+            "text_size",
+            (value[0] - dp(20), None)
+        )
+    )
+
+    close_btn = make_button("OK", 50)
+
+    content.add_widget(label)
+    content.add_widget(close_btn)
+
+    popup = Popup(
+        title=title,
+        content=content,
+        size_hint=(0.90, 0.45),
+        auto_dismiss=False
+    )
+
+    close_btn.bind(on_release=popup.dismiss)
+
+    popup.open()
+
+
+def add_back_button(layout, screen_name="home"):
+
+    back_btn = make_button(
+        "⬅ BACK",
+        54,
+        DARK_BLUE
+    )
+
+    layout.add_widget(back_btn)
+
+    back_btn.bind(
+        on_release=lambda x:
+        setattr(
+            App.get_running_app().sm,
+            "current",
+            screen_name
+        )
+    )
+
+    return back_btn
+
+
 # =========================================================
-# LOADING
+# BACKEND API
+# =========================================================
+
+class BackendAPI:
+
+    # Apna actual backend URL baad me yahan lagana.
+    BASE_URL = "https://YOUR-BACKEND-DOMAIN.com/api"
+
+    @staticmethod
+    def request(endpoint, data=None, method="POST"):
+
+        url = BackendAPI.BASE_URL + endpoint
+
+        payload = None
+
+        if data is not None:
+            payload = json.dumps(data).encode("utf-8")
+
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+        )
+
+        try:
+
+            with urllib.request.urlopen(
+                request,
+                timeout=15
+            ) as response:
+
+                raw = response.read().decode("utf-8")
+
+                try:
+                    return json.loads(raw)
+
+                except json.JSONDecodeError:
+                    return {
+                        "success": True,
+                        "message": raw
+                    }
+
+        except Exception as e:
+
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    @staticmethod
+    def submit_loan(application):
+
+        return BackendAPI.request(
+            "/loan/apply",
+            application,
+            "POST"
+        )
+
+    @staticmethod
+    def get_loan_status(application_id):
+
+        return BackendAPI.request(
+            "/loan/status/" + str(application_id),
+            None,
+            "GET"
+        )
+
+
+# =========================================================
+# BASE SCREEN
+# =========================================================
+
+class BaseScreen(Screen):
+
+    def build_scroll(self):
+
+        scroll = ScrollView(
+            do_scroll_x=False,
+            bar_width=dp(4)
+        )
+
+        layout = BoxLayout(
+            orientation="vertical",
+            padding=[dp(16), dp(16)],
+            spacing=dp(10),
+            size_hint_y=None
+        )
+
+        layout.bind(
+            minimum_height=layout.setter("height")
+        )
+
+        scroll.add_widget(layout)
+
+        self.add_widget(scroll)
+
+        return layout
+
+
+# =========================================================
+# LOADING SCREEN
 # =========================================================
 
 class LoadingScreen(Screen):
 
-    def on_enter(self):
-        Clock.schedule_once(self.go_password, 1.2)
+    def __init__(self, **kwargs):
 
-    def go_password(self, dt):
-        self.manager.current = "password"
+        super().__init__(**kwargs)
+
+        layout = BoxLayout(
+            orientation="vertical",
+            padding=dp(30),
+            spacing=dp(20)
+        )
+
+        layout.add_widget(
+            Label(
+                text="PAYAL LOAN",
+                font_size=sp(34),
+                bold=True,
+                color=BLUE
+            )
+        )
+
+        layout.add_widget(
+            Label(
+                text="Smart Loan & EMI",
+                font_size=sp(20),
+                color=GRAY
+            )
+        )
+
+        self.add_widget(layout)
+
+        Clock.schedule_once(
+            self.open_password,
+            1.2
+        )
+
+    def open_password(self, dt):
+
+        App.get_running_app().sm.current = "password"
 
 
 # =========================================================
-# PASSWORD
+# PASSWORD SCREEN
 # =========================================================
 
-class PasswordScreen(Screen):
+class PasswordScreen(BaseScreen):
 
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
-        self.build_screen()
 
-    def build_screen(self):
+        layout = self.build_scroll()
 
-        self.clear_widgets()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=30,
-            spacing=18
+        layout.add_widget(
+            make_label(
+                "🔐 PAYAL LOAN",
+                28,
+                True,
+                BLUE
+            )
         )
 
-        title = Label(
-            text="PAYAL LOAN",
-            font_size=32,
-            bold=True,
-            size_hint_y=None,
-            height=80
+        layout.add_widget(
+            make_label(
+                "Enter Password",
+                20,
+                True,
+                BLACK
+            )
         )
 
-        subtitle = Label(
-            text="Secure Loan Application",
-            font_size=18,
-            size_hint_y=None,
-            height=45
+        self.password_input = make_input(
+            "Password",
+            True
         )
 
-        self.password_input = TextInput(
-            hint_text="Enter Password",
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=55,
-            font_size=18
+        layout.add_widget(
+            self.password_input
         )
 
-        login_btn = make_button("🔐 Login")
-        login_btn.bind(on_release=self.login)
+        login_btn = make_button(
+            "LOGIN",
+            56,
+            BLUE
+        )
 
-        forgot_btn = make_button("Forgot Password", 45)
-        forgot_btn.bind(on_release=self.forgot_password)
+        layout.add_widget(
+            login_btn
+        )
 
-        main.add_widget(title)
-        main.add_widget(subtitle)
-        main.add_widget(self.password_input)
-        main.add_widget(login_btn)
-        main.add_widget(forgot_btn)
+        login_btn.bind(
+            on_release=self.login
+        )
 
-        self.add_widget(main)
+        forgot_btn = make_button(
+            "Forgot Password?",
+            50,
+            GRAY
+        )
+
+        layout.add_widget(
+            forgot_btn
+        )
+
+        forgot_btn.bind(
+            on_release=self.forgot_password
+        )
 
     def login(self, instance):
 
@@ -113,632 +399,465 @@ class PasswordScreen(Screen):
         if self.password_input.text == saved_password:
 
             self.password_input.text = ""
-            self.manager.current = "home"
+
+            app.sm.current = "home"
 
         else:
 
-            self.show_popup(
+            show_message(
                 "Wrong Password",
-                "Password is incorrect."
+                "Password galat hai."
             )
 
     def forgot_password(self, instance):
 
-        self.show_popup(
-            "Forgot Password",
-            "Default password is 1234.\n\n"
-            "If you changed the password and forgot it, "
-            "reset the application data."
+        show_message(
+            "Password",
+            "Default password: 1234\n\n"
+            "Aap Settings me jaakar password change kar sakte hain."
         )
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(
-            text=message,
-            halign="center"
-        )
-
-        button = make_button("OK", 50)
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.85, 0.4)
-        )
-
-        button.bind(on_release=popup.dismiss)
-
-        popup.open()
 
 
 # =========================================================
-# HOME
+# HOME SCREEN
 # =========================================================
 
-class HomeScreen(Screen):
+class HomeScreen(BaseScreen):
 
-    def on_pre_enter(self):
-        self.build_screen()
+    def __init__(self, **kwargs):
 
-    def build_screen(self):
+        super().__init__(**kwargs)
 
-        self.clear_widgets()
+        layout = self.build_scroll()
 
-        app = App.get_running_app()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=10
+        layout.add_widget(
+            make_label(
+                "PAYAL LOAN",
+                30,
+                True,
+                BLUE
+            )
         )
 
-        title = Label(
-            text="PAYAL LOAN",
-            font_size=30,
-            bold=True,
-            size_hint_y=None,
-            height=65
+        layout.add_widget(
+            make_label(
+                "Smart Loan & EMI",
+                18,
+                False,
+                GRAY
+            )
         )
 
-        welcome = Label(
-            text=(
-                "Welcome to Payal Loan"
-                if app.language == "English"
-                else "Payal Loan में आपका स्वागत है"
-            ),
-            font_size=18,
-            size_hint_y=None,
-            height=45
+        layout.add_widget(
+            make_label(
+                "Welcome 👋",
+                20,
+                True,
+                BLACK
+            )
         )
 
-        main.add_widget(title)
-        main.add_widget(welcome)
-
-        if app.language == "Hindi":
-
-            buttons = [
-                ("💰 लोन / EMI कैलकुलेटर", "loan"),
-                ("📝 लोन लें / Apply Loan", "apply"),
-                ("💳 Credit Score", "credit"),
-                ("✅ Eligibility Test", "eligibility"),
-                ("📊 लोन स्टेटस", "status"),
-                ("👤 प्रोफाइल", "profile"),
-                ("⚙️ सेटिंग्स", "settings"),
-                ("🔑 पासवर्ड बदलें", "change_password"),
-                ("❓ मदद / About", "help")
-            ]
-
-        else:
-
-            buttons = [
-                ("💰 Loan / EMI Calculator", "loan"),
-                ("📝 Apply / Take Loan", "apply"),
-                ("💳 Credit Score", "credit"),
-                ("✅ Loan Eligibility Test", "eligibility"),
-                ("📊 Loan Status", "status"),
-                ("👤 Profile", "profile"),
-                ("⚙️ Settings", "settings"),
-                ("🔑 Change Password", "change_password"),
-                ("❓ Help / About", "help")
-            ]
+        buttons = [
+            ("💰 Loan Calculator", "loan"),
+            ("📝 Apply / Take Loan", "apply"),
+            ("📊 Credit Score", "credit"),
+            ("✅ Eligibility Test", "eligibility"),
+            ("📄 Loan Status", "status"),
+            ("👤 Profile", "profile"),
+            ("⚙ Settings", "settings"),
+            ("🔐 Change Password", "change_password"),
+            ("❓ Help / About", "help")
+        ]
 
         for text, screen_name in buttons:
 
-            btn = make_button(text)
-
-            btn.bind(
-                on_release=lambda instance,
-                name=screen_name:
-                self.go_to(name)
+            btn = make_button(
+                text,
+                58,
+                BLUE
             )
 
-            main.add_widget(btn)
+            layout.add_widget(btn)
 
-        self.add_widget(main)
-
-    def go_to(self, screen_name):
-        self.manager.current = screen_name
+            btn.bind(
+                on_release=lambda x,
+                name=screen_name:
+                setattr(
+                    App.get_running_app().sm,
+                    "current",
+                    name
+                )
+            )
 
 
 # =========================================================
-# LOAN EMI CALCULATOR
+# LOAN CALCULATOR
 # =========================================================
 
-class LoanScreen(Screen):
+class LoanScreen(BaseScreen):
 
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
 
-        self.emi = 0
-        self.total_payment = 0
-        self.total_interest = 0
+        layout = self.build_scroll()
 
-        self.build_screen()
-
-    def build_screen(self):
-
-        self.clear_widgets()
-
-        app = App.get_running_app()
-
-        if app.language == "Hindi":
-
-            title = "लोन EMI कैलकुलेटर"
-            name_hint = "पूरा नाम"
-            mobile_hint = "मोबाइल नंबर"
-            amount_hint = "लोन राशि (₹)"
-            interest_hint = "वार्षिक ब्याज (%)"
-            period_hint = "लोन अवधि (महीने)"
-
-            calculate_text = "🧮 EMI Calculate करें"
-            summary_text = "📋 Summary"
-            apply_text = "📝 Loan के लिए Apply करें"
-            back_text = "⬅ वापस"
-
-        else:
-
-            title = "Loan EMI Calculator"
-            name_hint = "Full Name"
-            mobile_hint = "Mobile Number"
-            amount_hint = "Loan Amount (₹)"
-            interest_hint = "Annual Interest (%)"
-            period_hint = "Loan Period (Months)"
-
-            calculate_text = "🧮 Calculate EMI"
-            summary_text = "📋 Summary"
-            apply_text = "📝 Apply for Loan"
-            back_text = "⬅ Back"
-
-        scroll = ScrollView()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=12,
-            size_hint_y=None
+        layout.add_widget(
+            make_label(
+                "💰 LOAN CALCULATOR",
+                26,
+                True,
+                BLUE
+            )
         )
 
-        main.bind(
-            minimum_height=main.setter("height")
+        # IMPORTANT:
+        # self.name use nahi karna.
+        # Screen me name already built-in property hai.
+        self.name_input = make_input(
+            "Full Name"
         )
 
-        title_label = Label(
-            text=title,
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
+        self.mobile_input = make_input(
+            "Mobile Number"
         )
 
-        self.name_input = TextInput(
-            hint_text=name_hint,
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        self.amount_input = make_input(
+            "Loan Amount (₹)"
         )
 
-        self.mobile_input = TextInput(
-            hint_text=mobile_hint,
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
+        self.interest_input = make_input(
+            "Annual Interest (%)"
         )
 
-        self.amount_input = TextInput(
-            hint_text=amount_hint,
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
+        self.months_input = make_input(
+            "Loan Period (Months)"
         )
 
-        self.rate_input = TextInput(
-            hint_text=interest_hint,
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
+        layout.add_widget(
+            self.name_input
         )
 
-        self.period_input = TextInput(
-            hint_text=period_hint,
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
+        layout.add_widget(
+            self.mobile_input
         )
 
-        calculate_btn = make_button(calculate_text)
+        layout.add_widget(
+            self.amount_input
+        )
+
+        layout.add_widget(
+            self.interest_input
+        )
+
+        layout.add_widget(
+            self.months_input
+        )
+
+        calculate_btn = make_button(
+            "CALCULATE EMI",
+            58,
+            BLUE
+        )
+
+        layout.add_widget(
+            calculate_btn
+        )
+
         calculate_btn.bind(
             on_release=self.calculate_emi
         )
 
-        self.result_label = Label(
-            text="Monthly EMI: ₹0.00",
-            font_size=22,
-            bold=True,
-            size_hint_y=None,
-            height=60
+        self.result_label = make_label(
+            "",
+            18,
+            True,
+            BLACK
         )
 
-        summary_btn = make_button(summary_text)
-        summary_btn.bind(
-            on_release=self.show_summary
+        layout.add_widget(
+            self.result_label
         )
 
-        apply_btn = make_button(apply_text)
+        apply_btn = make_button(
+            "📝 APPLY / TAKE LOAN",
+            58,
+            GREEN
+        )
+
+        layout.add_widget(
+            apply_btn
+        )
+
         apply_btn.bind(
-            on_release=self.prepare_apply
+            on_release=self.open_apply
         )
 
-        back_btn = make_button(back_text, 50)
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
-            )
+        add_back_button(
+            layout,
+            "home"
         )
-
-        main.add_widget(title_label)
-        main.add_widget(self.name_input)
-        main.add_widget(self.mobile_input)
-        main.add_widget(self.amount_input)
-        main.add_widget(self.rate_input)
-        main.add_widget(self.period_input)
-        main.add_widget(calculate_btn)
-        main.add_widget(self.result_label)
-        main.add_widget(summary_btn)
-        main.add_widget(apply_btn)
-        main.add_widget(back_btn)
-
-        scroll.add_widget(main)
-
-        self.add_widget(scroll)
 
     def calculate_emi(self, instance):
 
         try:
 
-            principal = float(
+            amount = float(
                 self.amount_input.text
             )
 
-            annual_rate = float(
-                self.rate_input.text
+            interest = float(
+                self.interest_input.text
             )
 
             months = int(
-                self.period_input.text
+                self.months_input.text
             )
 
-            if principal < 1000:
+            if amount < 1000:
 
-                self.show_popup(
+                show_message(
                     "Invalid Amount",
-                    "Minimum loan amount is ₹1000."
+                    "Minimum loan amount ₹1000 hai."
                 )
-                return
 
-            if annual_rate < 0:
-
-                self.show_popup(
-                    "Invalid Interest",
-                    "Interest cannot be negative."
-                )
                 return
 
             if months <= 0:
 
-                self.show_popup(
+                show_message(
                     "Invalid Period",
-                    "Loan period must be at least 1 month."
+                    "Loan period months me 1 se zyada hona chahiye."
                 )
+
                 return
 
             monthly_rate = (
-                annual_rate / 12 / 100
+                interest / 12 / 100
             )
 
             if monthly_rate == 0:
 
-                emi = principal / months
+                emi = amount / months
 
             else:
 
                 emi = (
-                    principal
+                    amount
                     * monthly_rate
                     * (1 + monthly_rate) ** months
-                    /
-                    (
+                    / (
                         (1 + monthly_rate) ** months
                         - 1
                     )
                 )
 
-            self.emi = emi
+            total_payment = emi * months
 
-            self.total_payment = (
-                emi * months
+            total_interest = (
+                total_payment - amount
             )
 
-            self.total_interest = (
-                self.total_payment - principal
-            )
+            self.calculated_data = {
+
+                "amount": round(
+                    amount,
+                    2
+                ),
+
+                "interest": interest,
+
+                "months": months,
+
+                "emi": round(
+                    emi,
+                    2
+                ),
+
+                "total_payment": round(
+                    total_payment,
+                    2
+                ),
+
+                "total_interest": round(
+                    total_interest,
+                    2
+                )
+            }
 
             self.result_label.text = (
-                f"Monthly EMI: ₹{emi:,.2f}"
+                "Loan Amount: ₹"
+                + f"{amount:,.2f}"
+                + "\n\n"
+                "Monthly EMI: ₹"
+                + f"{emi:,.2f}"
+                + "\n\n"
+                "Total Interest: ₹"
+                + f"{total_interest:,.2f}"
+                + "\n\n"
+                "Total Payment: ₹"
+                + f"{total_payment:,.2f}"
             )
 
         except ValueError:
 
-            self.show_popup(
-                "Error",
-                "Please enter valid loan details."
+            show_message(
+                "Invalid Input",
+                "Amount, interest aur months sahi enter karein."
             )
 
-    def show_summary(self, instance):
+    def open_apply(self, instance):
 
-        if self.emi <= 0:
+        if not hasattr(
+            self,
+            "calculated_data"
+        ):
 
-            self.show_popup(
-                "Calculate EMI",
-                "Please calculate EMI first."
+            show_message(
+                "Calculate First",
+                "Pehle EMI calculate karein."
             )
+
             return
 
-        summary = (
-            f"Loan Amount: ₹"
-            f"{float(self.amount_input.text):,.2f}\n\n"
-
-            f"Interest: "
-            f"{self.rate_input.text}%\n\n"
-
-            f"Period: "
-            f"{self.period_input.text} Months\n\n"
-
-            f"Monthly EMI: ₹"
-            f"{self.emi:,.2f}\n\n"
-
-            f"Total Payment: ₹"
-            f"{self.total_payment:,.2f}\n\n"
-
-            f"Total Interest: ₹"
-            f"{self.total_interest:,.2f}"
-        )
-
-        self.show_popup(
-            "Loan Summary",
-            summary
-        )
-
-    def prepare_apply(self, instance):
-
-        if self.emi <= 0:
-
-            self.show_popup(
-                "Calculate EMI",
-                "Please calculate EMI before applying."
-            )
-            return
-
-        apply_screen = self.manager.get_screen(
+        apply_screen = App.get_running_app().sm.get_screen(
             "apply"
         )
 
-        apply_screen.name_input.text = (
-            self.name_input.text
+        apply_screen.set_loan_data(
+            self.name_input.text,
+            self.mobile_input.text,
+            self.calculated_data
         )
 
-        apply_screen.mobile_input.text = (
-            self.mobile_input.text
-        )
-
-        apply_screen.amount_input.text = (
-            self.amount_input.text
-        )
-
-        apply_screen.emi = self.emi
-
-        apply_screen.interest = (
-            self.rate_input.text
-        )
-
-        apply_screen.period = (
-            self.period_input.text
-        )
-
-        self.manager.current = "apply"
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(
-            text=message,
-            halign="center"
-        )
-
-        button = make_button("OK", 50)
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.88, 0.55)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
+        App.get_running_app().sm.current = "apply"
 
 
 # =========================================================
-# APPLY LOAN
+# APPLY LOAN SCREEN
 # =========================================================
 
-class ApplyLoanScreen(Screen):
+class ApplyLoanScreen(BaseScreen):
 
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
 
-        self.emi = 0
-        self.interest = ""
-        self.period = ""
+        layout = self.build_scroll()
 
-        self.build_screen()
-
-    def build_screen(self):
-
-        self.clear_widgets()
-
-        scroll = ScrollView()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=12,
-            size_hint_y=None
+        layout.add_widget(
+            make_label(
+                "📝 APPLY / TAKE LOAN",
+                26,
+                True,
+                BLUE
+            )
         )
 
-        main.bind(
-            minimum_height=main.setter("height")
+        self.name_input = make_input(
+            "Full Name"
         )
 
-        title = Label(
-            text="Apply / Take Loan",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
+        self.mobile_input = make_input(
+            "Mobile Number"
         )
 
-        self.name_input = TextInput(
-            hint_text="Full Name",
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        self.pan_input = make_input(
+            "PAN Card Number"
         )
 
-        self.mobile_input = TextInput(
-            hint_text="Mobile Number",
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
+        self.amount_input = make_input(
+            "Loan Amount (₹)"
         )
 
-        self.pan_input = TextInput(
-            hint_text="PAN Card Number",
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        self.emi_label = make_label(
+            "EMI: ₹0",
+            18,
+            True,
+            BLACK
         )
 
-        self.amount_input = TextInput(
-            hint_text="Loan Amount (₹)",
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
+        layout.add_widget(
+            self.name_input
         )
 
-        self.emi_label = Label(
-            text="Monthly EMI: ₹0.00",
-            font_size=20,
-            bold=True,
-            size_hint_y=None,
-            height=55
+        layout.add_widget(
+            self.mobile_input
+        )
+
+        layout.add_widget(
+            self.pan_input
+        )
+
+        layout.add_widget(
+            self.amount_input
+        )
+
+        layout.add_widget(
+            self.emi_label
         )
 
         submit_btn = make_button(
-            "✅ Submit Loan Application",
-            60
+            "SUBMIT LOAN APPLICATION",
+            60,
+            GREEN
+        )
+
+        layout.add_widget(
+            submit_btn
         )
 
         submit_btn.bind(
             on_release=self.submit_application
         )
 
-        back_btn = make_button(
-            "⬅ Back",
-            50
+        add_back_button(
+            layout,
+            "loan"
         )
 
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
-            )
+    def set_loan_data(
+        self,
+        name,
+        mobile,
+        loan_data
+    ):
+
+        self.name_input.text = name
+        self.mobile_input.text = mobile
+
+        self.loan_data = loan_data
+
+        self.amount_input.text = str(
+            loan_data["amount"]
         )
-
-        main.add_widget(title)
-        main.add_widget(self.name_input)
-        main.add_widget(self.mobile_input)
-        main.add_widget(self.pan_input)
-        main.add_widget(self.amount_input)
-        main.add_widget(self.emi_label)
-        main.add_widget(submit_btn)
-        main.add_widget(back_btn)
-
-        scroll.add_widget(main)
-
-        self.add_widget(scroll)
-
-    def on_pre_enter(self):
 
         self.emi_label.text = (
-            f"Monthly EMI: ₹{self.emi:,.2f}"
+            "Monthly EMI: ₹"
+            + f"{loan_data['emi']:,.2f}"
+            + "\n"
+            "Period: "
+            + str(loan_data["months"])
+            + " Months"
         )
 
     def submit_application(self, instance):
 
-        app = App.get_running_app()
-
         name = self.name_input.text.strip()
+
         mobile = self.mobile_input.text.strip()
+
         pan = self.pan_input.text.strip().upper()
 
-        try:
-            amount = float(
-                self.amount_input.text
-            )
-        except ValueError:
-
-            self.show_popup(
-                "Invalid Amount",
-                "Please enter a valid loan amount."
-            )
-            return
+        amount_text = self.amount_input.text.strip()
 
         if not name:
 
-            self.show_popup(
-                "Missing Name",
-                "Please enter your full name."
+            show_message(
+                "Required",
+                "Full name enter karein."
             )
+
             return
 
         if not re.fullmatch(
@@ -746,337 +865,302 @@ class ApplyLoanScreen(Screen):
             mobile
         ):
 
-            self.show_popup(
+            show_message(
                 "Invalid Mobile",
-                "Enter a valid 10 digit mobile number."
+                "10 digit mobile number enter karein."
             )
+
             return
 
         if not re.fullmatch(
-            r"[A-Z]{5}[0-9]{4}[A-Z]",
+            r"^[A-Z]{5}[0-9]{4}[A-Z]$",
             pan
         ):
 
-            self.show_popup(
+            show_message(
                 "Invalid PAN",
-                "PAN format should be ABCDE1234F."
+                "PAN format example: ABCDE1234F"
             )
+
+            return
+
+        try:
+
+            amount = float(
+                amount_text
+            )
+
+        except ValueError:
+
+            show_message(
+                "Invalid Amount",
+                "Loan amount sahi enter karein."
+            )
+
             return
 
         if amount < 1000:
 
-            self.show_popup(
+            show_message(
                 "Invalid Amount",
-                "Minimum loan amount is ₹1000."
+                "Minimum loan amount ₹1000 hai."
             )
+
             return
 
-        if self.emi <= 0:
+        if not hasattr(
+            self,
+            "loan_data"
+        ):
 
-            self.show_popup(
-                "EMI Missing",
-                "Please calculate EMI first."
+            show_message(
+                "Loan Data",
+                "Pehle Loan Calculator se loan calculate karein."
             )
+
             return
-
-        # Credit score from saved/demo score
-        credit_score = app.get_credit_score()
-
-        loan_data = {
-            "name": name,
-            "mobile": mobile,
-            "pan": pan,
-            "amount": amount,
-            "emi": self.emi,
-            "interest": self.interest,
-            "period": self.period,
-            "credit_score": credit_score,
-            "status": "Pending"
-        }
-
-        app.store.put(
-            "loan_application",
-            **loan_data
-        )
-
-        self.show_popup(
-            "Application Submitted",
-            f"Loan application submitted.\n\n"
-            f"Credit Score: {credit_score}\n"
-            f"Status: Pending"
-        )
-
-        self.manager.current = "status"
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(
-            text=message,
-            halign="center"
-        )
-
-        button = make_button("OK", 50)
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.88, 0.5)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
-
-
-# =========================================================
-# CREDIT SCORE
-# =========================================================
-
-class CreditScoreScreen(Screen):
-
-    def on_pre_enter(self):
-
-        self.build_screen()
-
-    def build_screen(self):
-
-        self.clear_widgets()
 
         app = App.get_running_app()
 
-        score = app.get_credit_score()
+        application_id = (
+            "PL"
+            + str(
+                int(
+                    Clock.get_time()
+                    * 1000
+                )
+            )[-8:]
+        )
 
-        if score >= 750:
+        application = {
 
-            rating = "Excellent"
-            message = (
-                "Your credit score is excellent."
-            )
+            "application_id":
+                application_id,
 
-        elif score >= 700:
+            "name":
+                name,
 
-            rating = "Good"
-            message = (
-                "Your credit score is good."
-            )
+            "mobile":
+                mobile,
 
-        elif score >= 650:
+            "pan":
+                pan,
 
-            rating = "Average"
-            message = (
-                "Your credit score is average."
+            "amount":
+                amount,
+
+            "interest":
+                self.loan_data["interest"],
+
+            "months":
+                self.loan_data["months"],
+
+            "emi":
+                self.loan_data["emi"],
+
+            "total_payment":
+                self.loan_data["total_payment"],
+
+            "total_interest":
+                self.loan_data["total_interest"],
+
+            "status":
+                "APPLICATION_SUBMITTED"
+        }
+
+        # Local storage
+        app.store.put(
+            "loan",
+            **application
+        )
+
+        # Profile save
+        app.store.put(
+            "profile",
+            name=name,
+            mobile=mobile
+        )
+
+        # Backend request
+        result = BackendAPI.submit_loan(
+            application
+        )
+
+        if result.get("success"):
+
+            status_message = (
+                "Loan application successfully "
+                "backend par submit ho gayi.\n\n"
+                "Application ID: "
+                + application_id
             )
 
         else:
 
-            rating = "Low"
-            message = (
-                "Your credit score is low."
+            status_message = (
+                "Application local device par save ho gayi.\n\n"
+                "Application ID: "
+                + application_id
+                + "\n\n"
+                "Backend connect nahi hua, "
+                "isliye real loan approve/disburse nahi hua."
             )
 
-        main = BoxLayout(
-            orientation="vertical",
-            padding=25,
-            spacing=15
+        show_message(
+            "Loan Application",
+            status_message
         )
 
-        title = Label(
-            text="💳 Credit Score",
-            font_size=30,
-            bold=True,
-            size_hint_y=None,
-            height=65
-        )
-
-        score_label = Label(
-            text=str(score),
-            font_size=55,
-            bold=True,
-            size_hint_y=None,
-            height=100
-        )
-
-        rating_label = Label(
-            text=rating,
-            font_size=25,
-            bold=True,
-            size_hint_y=None,
-            height=50
-        )
-
-        message_label = Label(
-            text=message,
-            font_size=18
-        )
-
-        info = Label(
-            text=(
-                "750+ = Excellent\n"
-                "700-749 = Good\n"
-                "650-699 = Average\n"
-                "Below 650 = Low\n\n"
-                "This is a demo score and is not "
-                "a real CIBIL score."
-            ),
-            font_size=16
-        )
-
-        back_btn = make_button(
-            "⬅ Back",
-            50
-        )
-
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
-            )
-        )
-
-        main.add_widget(title)
-        main.add_widget(score_label)
-        main.add_widget(rating_label)
-        main.add_widget(message_label)
-        main.add_widget(info)
-        main.add_widget(back_btn)
-
-        self.add_widget(main)
+        app.sm.current = "status"
 
 
 # =========================================================
-# ELIGIBILITY TEST
+# CREDIT SCORE SCREEN
 # =========================================================
 
-class EligibilityScreen(Screen):
+class CreditScoreScreen(BaseScreen):
 
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
-        self.build_screen()
 
-    def build_screen(self):
+        layout = self.build_scroll()
 
-        self.clear_widgets()
-
-        scroll = ScrollView()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=12,
-            size_hint_y=None
-        )
-
-        main.bind(
-            minimum_height=main.setter("height")
-        )
-
-        title = Label(
-            text="✅ Loan Eligibility Test",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
-        )
-
-        self.age_input = TextInput(
-            hint_text="Age",
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
-        )
-
-        self.income_input = TextInput(
-            hint_text="Monthly Income (₹)",
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
-        )
-
-        self.existing_emi_input = TextInput(
-            hint_text="Existing Monthly EMI (₹)",
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
-        )
-
-        self.loan_amount_input = TextInput(
-            hint_text="Required Loan Amount (₹)",
-            multiline=False,
-            input_filter="float",
-            size_hint_y=None,
-            height=55
-        )
-
-        self.credit_input = TextInput(
-            hint_text="Credit Score",
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
-        )
-
-        test_btn = make_button(
-            "🔍 Check Eligibility",
-            60
-        )
-
-        test_btn.bind(
-            on_release=self.check_eligibility
-        )
-
-        self.result_label = Label(
-            text="",
-            font_size=19,
-            bold=True,
-            size_hint_y=None,
-            height=130
-        )
-
-        back_btn = make_button(
-            "⬅ Back",
-            50
-        )
-
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
+        layout.add_widget(
+            make_label(
+                "📊 CREDIT SCORE",
+                26,
+                True,
+                BLUE
             )
         )
 
-        main.add_widget(title)
-        main.add_widget(self.age_input)
-        main.add_widget(self.income_input)
-        main.add_widget(self.existing_emi_input)
-        main.add_widget(self.loan_amount_input)
-        main.add_widget(self.credit_input)
-        main.add_widget(test_btn)
-        main.add_widget(self.result_label)
-        main.add_widget(back_btn)
+        score = App.get_running_app().store.get(
+            "settings"
+        ).get(
+            "demo_credit_score",
+            750
+        )
 
-        scroll.add_widget(main)
+        layout.add_widget(
+            make_label(
+                "Current Demo Score",
+                20,
+                True,
+                BLACK
+            )
+        )
 
-        self.add_widget(scroll)
+        layout.add_widget(
+            make_label(
+                str(score),
+                55,
+                True,
+                BLUE
+            )
+        )
 
-    def check_eligibility(self, instance):
+        layout.add_widget(
+            make_label(
+                "⚠ This is a demo score.\n\n"
+                "Real credit score ke liye authorised "
+                "credit bureau integration required hai.",
+                17,
+                False,
+                GRAY
+            )
+        )
+
+        add_back_button(
+            layout,
+            "home"
+        )
+
+
+# =========================================================
+# ELIGIBILITY SCREEN
+# =========================================================
+
+class EligibilityScreen(BaseScreen):
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+        layout = self.build_scroll()
+
+        layout.add_widget(
+            make_label(
+                "✅ ELIGIBILITY TEST",
+                26,
+                True,
+                BLUE
+            )
+        )
+
+        self.age_input = make_input(
+            "Age"
+        )
+
+        self.income_input = make_input(
+            "Monthly Income (₹)"
+        )
+
+        self.existing_emi_input = make_input(
+            "Existing EMI (₹)"
+        )
+
+        self.required_loan_input = make_input(
+            "Required Loan (₹)"
+        )
+
+        layout.add_widget(
+            self.age_input
+        )
+
+        layout.add_widget(
+            self.income_input
+        )
+
+        layout.add_widget(
+            self.existing_emi_input
+        )
+
+        layout.add_widget(
+            self.required_loan_input
+        )
+
+        check_btn = make_button(
+            "CHECK ELIGIBILITY",
+            58,
+            BLUE
+        )
+
+        layout.add_widget(
+            check_btn
+        )
+
+        check_btn.bind(
+            on_release=self.check
+        )
+
+        self.result = make_label(
+            "",
+            18,
+            True,
+            BLACK
+        )
+
+        layout.add_widget(
+            self.result
+        )
+
+        add_back_button(
+            layout,
+            "home"
+        )
+
+    def check(self, instance):
 
         try:
 
@@ -1092,876 +1176,649 @@ class EligibilityScreen(Screen):
                 self.existing_emi_input.text
             )
 
-            loan_amount = float(
-                self.loan_amount_input.text
+            required_loan = float(
+                self.required_loan_input.text
             )
 
-            credit_score = int(
-                self.credit_input.text
+            if age < 18:
+
+                self.result.text = (
+                    "❌ Age 18 se kam hai."
+                )
+
+                return
+
+            if income <= 0:
+
+                self.result.text = (
+                    "❌ Income valid nahi hai."
+                )
+
+                return
+
+            if required_loan < 1000:
+
+                self.result.text = (
+                    "❌ Minimum loan amount ₹1000 hai."
+                )
+
+                return
+
+            remaining_income = (
+                income - existing_emi
             )
 
-        except ValueError:
+            if remaining_income <= 0:
 
-            self.show_popup(
-                "Error",
-                "Please enter all details correctly."
-            )
-            return
-
-        if age < 18:
-
-            self.result_label.text = (
-                "🔴 NOT ELIGIBLE\n\n"
-                "Age must be 18 or above."
-            )
-            return
-
-        if income <= 0:
-
-            self.result_label.text = (
-                "🔴 NOT ELIGIBLE\n\n"
-                "Monthly income is required."
-            )
-            return
-
-        if loan_amount < 1000:
-
-            self.result_label.text = (
-                "🔴 NOT ELIGIBLE\n\n"
-                "Minimum loan amount is ₹1000."
-            )
-            return
-
-        if credit_score >= 750:
-
-            score_points = 2
-
-        elif credit_score >= 700:
-
-            score_points = 1
-
-        else:
-
-            score_points = 0
-
-        # Simple demo income test
-        remaining_income = (
-            income - existing_emi
-        )
-
-        loan_limit = (
-            remaining_income * 10
-        )
-
-        if loan_amount <= loan_limit:
-
-            income_ok = True
-
-        else:
-
-            income_ok = False
-
-        if (
-            score_points == 2
-            and income_ok
-        ):
-
-            self.result_label.text = (
-                "🟢 ELIGIBLE\n\n"
-                "Your basic eligibility looks good."
-            )
-
-        elif (
-            score_points >= 1
-            and income_ok
-        ):
-
-            self.result_label.text = (
-                "🟡 MAY BE ELIGIBLE\n\n"
-                "You may be eligible, subject to "
-                "further verification."
-            )
-
-        else:
-
-            self.result_label.text = (
-                "🔴 NOT ELIGIBLE\n\n"
-                "Income or credit score does not "
-                "meet this demo's criteria."
-            )
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(
-            text=message
-        )
-
-        button = make_button(
-            "OK",
-            50
-        )
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.85, 0.4)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
-
-
-# =========================================================
-# LOAN STATUS
-# =========================================================
-
-class LoanStatusScreen(Screen):
-
-    def on_pre_enter(self):
-
-        self.build_screen()
-
-    def build_screen(self):
-
-        self.clear_widgets()
-
-        app = App.get_running_app()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=15
-        )
-
-        title = Label(
-            text="📊 Loan Status",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
-        )
-
-        if app.store.exists(
-            "loan_application"
-        ):
-
-            data = app.store.get(
-                "loan_application"
-            )
-
-            pan = data.get(
-                "pan",
-                ""
-            )
-
-            if len(pan) >= 6:
-
-                masked_pan = (
-                    pan[:2]
-                    + "******"
-                    + pan[-2:]
+                self.result.text = (
+                    "❌ Existing EMI income ke "
+                    "comparison me bahut zyada hai."
                 )
 
             else:
 
-                masked_pan = "********"
+                self.result.text = (
+                    "ℹ Basic affordability check passed.\n\n"
+                    "Final loan eligibility authorised "
+                    "lender hi decide karega."
+                )
 
-            details = (
-                f"Name: {data.get('name', '')}\n\n"
-                f"Mobile: {data.get('mobile', '')}\n\n"
-                f"PAN: {masked_pan}\n\n"
-                f"Credit Score: "
-                f"{data.get('credit_score', 0)}\n\n"
-                f"Loan Amount: ₹"
-                f"{data.get('amount', 0):,.2f}\n\n"
-                f"Monthly EMI: ₹"
-                f"{data.get('emi', 0):,.2f}\n\n"
-                f"Interest: "
-                f"{data.get('interest', '')}%\n\n"
-                f"Loan Period: "
-                f"{data.get('period', '')} Months\n\n"
-                f"Status: "
-                f"{data.get('status', 'Pending')}"
+        except ValueError:
+
+            show_message(
+                "Invalid Input",
+                "Sabhi details sahi enter karein."
+            )
+
+
+# =========================================================
+# LOAN STATUS SCREEN
+# =========================================================
+
+class LoanStatusScreen(BaseScreen):
+
+    def __init__(self, **kwargs):
+
+        super().__init__(**kwargs)
+
+        self.layout = self.build_scroll()
+
+        self.refresh()
+
+    def on_pre_enter(self):
+
+        self.refresh()
+
+    def refresh(self):
+
+        if not hasattr(
+            self,
+            "layout"
+        ):
+            return
+
+        self.layout.clear_widgets()
+
+        self.layout.add_widget(
+            make_label(
+                "📄 LOAN STATUS",
+                26,
+                True,
+                BLUE
+            )
+        )
+
+        app = App.get_running_app()
+
+        if not app.store.exists("loan"):
+
+            self.layout.add_widget(
+                make_label(
+                    "No loan application found.",
+                    18,
+                    False,
+                    BLACK
+                )
             )
 
         else:
 
+            loan = app.store.get(
+                "loan"
+            )
+
+            pan = loan.get(
+                "pan",
+                ""
+            )
+
+            masked_pan = "******"
+
+            if len(pan) >= 4:
+                masked_pan = (
+                    "*****"
+                    + pan[-4:]
+                )
+
             details = (
-                "No loan application found.\n\n"
-                "Please apply for a loan first."
+                "Application ID: "
+                + str(
+                    loan.get(
+                        "application_id",
+                        "-"
+                    )
+                )
+                + "\n\n"
+                "Name: "
+                + str(
+                    loan.get(
+                        "name",
+                        "-"
+                    )
+                )
+                + "\n\n"
+                "Mobile: "
+                + str(
+                    loan.get(
+                        "mobile",
+                        "-"
+                    )
+                )
+                + "\n\n"
+                "PAN: "
+                + masked_pan
+                + "\n\n"
+                "Loan Amount: ₹"
+                + f"{float(loan.get('amount', 0)):,.2f}"
+                + "\n\n"
+                "Monthly EMI: ₹"
+                + f"{float(loan.get('emi', 0)):,.2f}"
+                + "\n\n"
+                "Interest: "
+                + str(
+                    loan.get(
+                        "interest",
+                        0
+                    )
+                )
+                + "%"
+                + "\n\n"
+                "Loan Period: "
+                + str(
+                    loan.get(
+                        "months",
+                        0
+                    )
+                )
+                + " Months"
+                + "\n\n"
+                "Status: "
+                + str(
+                    loan.get(
+                        "status",
+                        "-"
+                    )
+                )
             )
 
-        details_label = Label(
-            text=details,
-            font_size=17,
-            halign="left"
-        )
-
-        back_btn = make_button(
-            "⬅ Back",
-            50
-        )
-
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
+            self.layout.add_widget(
+                make_label(
+                    details,
+                    17,
+                    False,
+                    BLACK
+                )
             )
+
+        add_back_button(
+            self.layout,
+            "home"
         )
-
-        main.add_widget(title)
-        main.add_widget(details_label)
-        main.add_widget(back_btn)
-
-        self.add_widget(main)
 
 
 # =========================================================
-# PROFILE
+# PROFILE SCREEN
 # =========================================================
 
-class ProfileScreen(Screen):
+class ProfileScreen(BaseScreen):
 
-    def on_pre_enter(self):
+    def __init__(self, **kwargs):
 
-        self.build_screen()
+        super().__init__(**kwargs)
 
-    def build_screen(self):
+        layout = self.build_scroll()
 
-        self.clear_widgets()
-
-        app = App.get_running_app()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=15
-        )
-
-        title = Label(
-            text="👤 Profile",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
-        )
-
-        profile = {}
-
-        if app.store.exists("profile"):
-
-            profile = app.store.get(
-                "profile"
+        layout.add_widget(
+            make_label(
+                "👤 PROFILE",
+                26,
+                True,
+                BLUE
             )
-
-        self.name_input = TextInput(
-            text=profile.get(
-                "name",
-                ""
-            ),
-            hint_text="Your Name",
-            multiline=False,
-            size_hint_y=None,
-            height=55
         )
 
-        self.mobile_input = TextInput(
-            text=profile.get(
-                "mobile",
-                ""
-            ),
-            hint_text="Mobile Number",
-            multiline=False,
-            input_filter="int",
-            size_hint_y=None,
-            height=55
+        self.name_input = make_input(
+            "Full Name"
+        )
+
+        self.mobile_input = make_input(
+            "Mobile Number"
+        )
+
+        layout.add_widget(
+            self.name_input
+        )
+
+        layout.add_widget(
+            self.mobile_input
         )
 
         save_btn = make_button(
-            "💾 Save Profile"
+            "SAVE PROFILE",
+            56,
+            GREEN
+        )
+
+        layout.add_widget(
+            save_btn
         )
 
         save_btn.bind(
             on_release=self.save_profile
         )
 
-        back_btn = make_button(
-            "⬅ Back",
-            50
+        add_back_button(
+            layout,
+            "home"
         )
 
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
-            )
-        )
-
-        main.add_widget(title)
-        main.add_widget(self.name_input)
-        main.add_widget(self.mobile_input)
-        main.add_widget(save_btn)
-        main.add_widget(back_btn)
-
-        self.add_widget(main)
-
-    def save_profile(self, instance):
-
-        app = App.get_running_app()
-
-        app.store.put(
-            "profile",
-            name=self.name_input.text,
-            mobile=self.mobile_input.text
-        )
-
-        self.show_popup(
-            "Saved",
-            "Profile saved successfully."
-        )
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(text=message)
-
-        button = make_button("OK", 50)
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.8, 0.35)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
-
-
-# =========================================================
-# SETTINGS
-# =========================================================
-
-class SettingsScreen(Screen):
+        self.load_profile()
 
     def on_pre_enter(self):
 
-        self.build_screen()
+        self.load_profile()
 
-    def build_screen(self):
+    def load_profile(self):
 
-        self.clear_widgets()
+        app = App.get_running_app()
 
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=15
+        if app.store.exists(
+            "profile"
+        ):
+
+            profile = app.store.get(
+                "profile"
+            )
+
+            self.name_input.text = profile.get(
+                "name",
+                ""
+            )
+
+            self.mobile_input.text = profile.get(
+                "mobile",
+                ""
+            )
+
+    def save_profile(self, instance):
+
+        name = self.name_input.text.strip()
+
+        mobile = self.mobile_input.text.strip()
+
+        if not name:
+
+            show_message(
+                "Profile",
+                "Name enter karein."
+            )
+
+            return
+
+        App.get_running_app().store.put(
+            "profile",
+            name=name,
+            mobile=mobile
         )
 
-        title = Label(
-            text="⚙️ Settings",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
+        show_message(
+            "Profile",
+            "Profile save ho gaya."
         )
 
-        theme_btn = make_button(
-            "🎨 Change Theme"
-        )
 
-        theme_btn.bind(
-            on_release=self.change_theme
-        )
+# =========================================================
+# SETTINGS SCREEN
+# =========================================================
 
-        language_btn = make_button(
-            "🌐 Change Language"
-        )
+class SettingsScreen(BaseScreen):
 
-        language_btn.bind(
-            on_release=self.change_language
-        )
+    def __init__(self, **kwargs):
 
-        privacy_btn = make_button(
-            "🔒 Privacy"
-        )
+        super().__init__(**kwargs)
 
-        privacy_btn.bind(
-            on_release=self.show_privacy
-        )
+        layout = self.build_scroll()
 
-        back_btn = make_button(
-            "⬅ Back",
-            50
-        )
-
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
+        layout.add_widget(
+            make_label(
+                "⚙ SETTINGS",
+                26,
+                True,
+                BLUE
             )
         )
 
-        main.add_widget(title)
-        main.add_widget(theme_btn)
-        main.add_widget(language_btn)
-        main.add_widget(privacy_btn)
-        main.add_widget(back_btn)
-
-        self.add_widget(main)
-
-    # -----------------------------------------------------
-    # THEME
-    # -----------------------------------------------------
-
-    def change_theme(self, instance):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=10
-        )
-
-        dark_btn = make_button(
-            "🌙 Dark Theme"
-        )
-
-        light_btn = make_button(
-            "☀ Light Theme"
+        layout.add_widget(
+            make_label(
+                "Theme",
+                20,
+                True,
+                BLACK
+            )
         )
 
         blue_btn = make_button(
-            "🔵 Blue Theme"
+            "🔵 Blue Theme",
+            54,
+            BLUE
         )
 
-        content.add_widget(dark_btn)
-        content.add_widget(light_btn)
-        content.add_widget(blue_btn)
-
-        popup = Popup(
-            title="Select Theme",
-            content=content,
-            size_hint=(0.8, 0.5)
+        light_btn = make_button(
+            "☀ Light Theme",
+            54,
+            LIGHT_BLUE
         )
 
-        dark_btn.bind(
+        dark_btn = make_button(
+            "🌙 Dark Theme",
+            54,
+            DARK_BLUE
+        )
+
+        layout.add_widget(
+            blue_btn
+        )
+
+        layout.add_widget(
+            light_btn
+        )
+
+        layout.add_widget(
+            dark_btn
+        )
+
+        blue_btn.bind(
             on_release=lambda x:
-            self.set_theme(
-                "Dark",
-                popup
+            App.get_running_app().set_theme(
+                "Blue"
             )
         )
 
         light_btn.bind(
             on_release=lambda x:
-            self.set_theme(
-                "Light",
-                popup
+            App.get_running_app().set_theme(
+                "Light"
             )
         )
 
-        blue_btn.bind(
+        dark_btn.bind(
             on_release=lambda x:
-            self.set_theme(
-                "Blue",
-                popup
+            App.get_running_app().set_theme(
+                "Dark"
             )
         )
 
-        popup.open()
-
-    def set_theme(self, theme, popup):
-
-        app = App.get_running_app()
-
-        app.theme = theme
-
-        app.store.put(
-            "settings",
-            language=app.language,
-            theme=theme
-        )
-
-        app.apply_theme()
-
-        popup.dismiss()
-
-        app.refresh_all_screens()
-
-    # -----------------------------------------------------
-    # LANGUAGE
-    # -----------------------------------------------------
-
-    def change_language(self, instance):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=10
+        layout.add_widget(
+            make_label(
+                "Language",
+                20,
+                True,
+                BLACK
+            )
         )
 
         english_btn = make_button(
-            "🇬🇧 English"
+            "English",
+            54,
+            BLUE
         )
 
         hindi_btn = make_button(
-            "🇮🇳 Hindi"
+            "हिंदी",
+            54,
+            GREEN
         )
 
-        content.add_widget(
+        layout.add_widget(
             english_btn
         )
 
-        content.add_widget(
+        layout.add_widget(
             hindi_btn
-        )
-
-        popup = Popup(
-            title="Select Language",
-            content=content,
-            size_hint=(0.8, 0.4)
         )
 
         english_btn.bind(
             on_release=lambda x:
-            self.set_language(
-                "English",
-                popup
+            App.get_running_app().set_language(
+                "English"
             )
         )
 
         hindi_btn.bind(
             on_release=lambda x:
-            self.set_language(
-                "Hindi",
-                popup
+            App.get_running_app().set_language(
+                "Hindi"
             )
         )
 
-        popup.open()
-
-    def set_language(self, language, popup):
-
-        app = App.get_running_app()
-
-        app.language = language
-
-        app.store.put(
-            "settings",
-            language=language,
-            theme=app.theme
+        layout.add_widget(
+            make_label(
+                "Privacy & Data",
+                20,
+                True,
+                BLACK
+            )
         )
 
-        popup.dismiss()
-
-        app.refresh_all_screens()
-
-    def show_privacy(self, instance):
-
-        self.show_popup(
-            "Privacy",
-            "This is a demo/local loan application.\n\n"
-            "Loan information is stored locally "
-            "on this device."
+        layout.add_widget(
+            make_label(
+                "App data local storage me save hota hai. "
+                "Real lending ke liye secure backend, "
+                "proper consent, KYC, privacy controls "
+                "aur authorised lender integration required hai.",
+                16,
+                False,
+                GRAY
+            )
         )
 
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
+        add_back_button(
+            layout,
+            "home"
         )
-
-        label = Label(
-            text=message,
-            halign="center"
-        )
-
-        button = make_button(
-            "OK",
-            50
-        )
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.88, 0.55)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
 
 
 # =========================================================
 # CHANGE PASSWORD
 # =========================================================
 
-class ChangePasswordScreen(Screen):
+class ChangePasswordScreen(BaseScreen):
 
-    def on_pre_enter(self):
+    def __init__(self, **kwargs):
 
-        self.build_screen()
+        super().__init__(**kwargs)
 
-    def build_screen(self):
+        layout = self.build_scroll()
 
-        self.clear_widgets()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=15
+        layout.add_widget(
+            make_label(
+                "🔐 CHANGE PASSWORD",
+                26,
+                True,
+                BLUE
+            )
         )
 
-        title = Label(
-            text="🔑 Change Password",
-            font_size=28,
-            bold=True,
-            size_hint_y=None,
-            height=65
+        self.old_password = make_input(
+            "Old Password",
+            True
         )
 
-        old_password = TextInput(
-            hint_text="Current Password",
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        self.new_password = make_input(
+            "New Password",
+            True
         )
 
-        new_password = TextInput(
-            hint_text="New Password",
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        self.confirm_password = make_input(
+            "Confirm New Password",
+            True
         )
 
-        confirm_password = TextInput(
-            hint_text="Confirm New Password",
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=55
+        layout.add_widget(
+            self.old_password
+        )
+
+        layout.add_widget(
+            self.new_password
+        )
+
+        layout.add_widget(
+            self.confirm_password
         )
 
         save_btn = make_button(
-            "🔐 Change Password"
+            "CHANGE PASSWORD",
+            58,
+            GREEN
+        )
+
+        layout.add_widget(
+            save_btn
         )
 
         save_btn.bind(
-            on_release=lambda x:
-            self.change_password(
-                old_password,
-                new_password,
-                confirm_password
-            )
+            on_release=self.change_password
         )
 
-        back_btn = make_button(
-            "⬅ Back",
-            50
+        add_back_button(
+            layout,
+            "home"
         )
 
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
-            )
-        )
-
-        main.add_widget(title)
-        main.add_widget(old_password)
-        main.add_widget(new_password)
-        main.add_widget(confirm_password)
-        main.add_widget(save_btn)
-        main.add_widget(back_btn)
-
-        self.add_widget(main)
-
-    def change_password(
-        self,
-        old_password,
-        new_password,
-        confirm_password
-    ):
+    def change_password(self, instance):
 
         app = App.get_running_app()
 
-        saved_password = app.store.get(
+        old = self.old_password.text
+
+        new = self.new_password.text
+
+        confirm = self.confirm_password.text
+
+        current_password = app.store.get(
             "security"
         ).get(
             "password",
             "1234"
         )
 
-        if old_password.text != saved_password:
+        if old != current_password:
 
-            self.show_popup(
-                "Error",
-                "Current password is incorrect."
+            show_message(
+                "Password",
+                "Old password galat hai."
             )
+
             return
 
-        if len(new_password.text) < 4:
+        if len(new) < 4:
 
-            self.show_popup(
-                "Error",
-                "New password must contain at least 4 characters."
+            show_message(
+                "Password",
+                "New password minimum 4 characters ka hona chahiye."
             )
+
             return
 
-        if new_password.text != confirm_password.text:
+        if new != confirm:
 
-            self.show_popup(
-                "Error",
-                "Passwords do not match."
+            show_message(
+                "Password",
+                "New password aur confirm password same nahi hain."
             )
+
             return
 
         app.store.put(
             "security",
-            password=new_password.text
+            password=new
         )
 
-        self.show_popup(
+        self.old_password.text = ""
+        self.new_password.text = ""
+        self.confirm_password.text = ""
+
+        show_message(
             "Success",
-            "Password changed successfully."
+            "Password successfully change ho gaya."
         )
-
-    def show_popup(self, title, message):
-
-        content = BoxLayout(
-            orientation="vertical",
-            padding=15,
-            spacing=15
-        )
-
-        label = Label(text=message)
-
-        button = make_button(
-            "OK",
-            50
-        )
-
-        content.add_widget(label)
-        content.add_widget(button)
-
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.8, 0.4)
-        )
-
-        button.bind(
-            on_release=popup.dismiss
-        )
-
-        popup.open()
 
 
 # =========================================================
-# HELP
+# HELP SCREEN
 # =========================================================
 
-class HelpScreen(Screen):
+class HelpScreen(BaseScreen):
 
-    def on_pre_enter(self):
+    def __init__(self, **kwargs):
 
-        self.build_screen()
+        super().__init__(**kwargs)
 
-    def build_screen(self):
+        layout = self.build_scroll()
 
-        self.clear_widgets()
-
-        main = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=15
-        )
-
-        title = Label(
-            text="❓ Payal Loan",
-            font_size=30,
-            bold=True,
-            size_hint_y=None,
-            height=65
-        )
-
-        info = Label(
-            text=(
-                "Payal Loan is a demo loan application.\n\n"
-                "Features:\n"
-                "• Loan EMI Calculator\n"
-                "• Loan Application\n"
-                "• Credit Score\n"
-                "• Eligibility Test\n"
-                "• Loan Status\n"
-                "• Hindi / English\n"
-                "• Dark / Light / Blue Theme\n"
-                "• Password Protection\n\n"
-                "This application is not connected "
-                "to a real bank or lender."
-            ),
-            font_size=17,
-            halign="left"
-        )
-
-        back_btn = make_button(
-            "⬅ Back",
-            50
-        )
-
-        back_btn.bind(
-            on_release=lambda x:
-            setattr(
-                self.manager,
-                "current",
-                "home"
+        layout.add_widget(
+            make_label(
+                "❓ HELP / ABOUT",
+                26,
+                True,
+                BLUE
             )
         )
 
-        main.add_widget(title)
-        main.add_widget(info)
-        main.add_widget(back_btn)
+        help_text = (
+            "PAYAL LOAN\n\n"
+            "Features:\n"
+            "• Loan EMI Calculator\n"
+            "• Loan Application\n"
+            "• PAN Validation\n"
+            "• Loan Status\n"
+            "• Credit Score Screen\n"
+            "• Eligibility Test\n"
+            "• Profile\n"
+            "• Hindi / English\n"
+            "• Blue / Light / Dark Theme\n"
+            "• Password Protection\n\n"
+            "IMPORTANT:\n"
+            "Current app local/demo functionality provide "
+            "karta hai. Real loan approval, KYC, credit "
+            "bureau verification aur money disbursement "
+            "ke liye authorised lender aur secure backend "
+            "integration required hai."
+        )
 
-        self.add_widget(main)
+        layout.add_widget(
+            make_label(
+                help_text,
+                17,
+                False,
+                BLACK
+            )
+        )
+
+        add_back_button(
+            layout,
+            "home"
+        )
 
 
 # =========================================================
@@ -1974,50 +1831,14 @@ class LoanApp(App):
 
         self.title = "Payal Loan"
 
-        data_file = os.path.join(
-            self.user_data_dir,
-            "payal_loan_data.json"
-        )
-
         self.store = JsonStore(
-            data_file
+            os.path.join(
+                self.user_data_dir,
+                "payal_loan_data.json"
+            )
         )
 
-        # -------------------------------------------------
-        # SETTINGS
-        # -------------------------------------------------
-
-        if self.store.exists("settings"):
-
-            settings = self.store.get(
-                "settings"
-            )
-
-            self.language = settings.get(
-                "language",
-                "English"
-            )
-
-            self.theme = settings.get(
-                "theme",
-                "Blue"
-            )
-
-        else:
-
-            self.language = "English"
-            self.theme = "Blue"
-
-            self.store.put(
-                "settings",
-                language=self.language,
-                theme=self.theme
-            )
-
-        # -------------------------------------------------
-        # PASSWORD
-        # -------------------------------------------------
-
+        # Default settings
         if not self.store.exists(
             "security"
         ):
@@ -2027,29 +1848,24 @@ class LoanApp(App):
                 password="1234"
             )
 
-        # -------------------------------------------------
-        # CREDIT SCORE
-        # -------------------------------------------------
-
         if not self.store.exists(
-            "credit_score"
+            "settings"
         ):
 
             self.store.put(
-                "credit_score",
-                score=750
+                "settings",
+                theme="Blue",
+                language="English",
+                demo_credit_score=750
             )
-
-        # -------------------------------------------------
-        # SCREEN MANAGER
-        # -------------------------------------------------
 
         self.sm = ScreenManager(
             transition=FadeTransition(
-                duration=0.2
+                duration=0.15
             )
         )
 
+        # Add screens
         self.sm.add_widget(
             LoadingScreen(
                 name="loading"
@@ -2122,87 +1938,116 @@ class LoanApp(App):
             )
         )
 
-        self.apply_theme()
+        self.sm.current = "loading"
+
+        self.apply_saved_theme()
 
         return self.sm
 
-    # -----------------------------------------------------
-    # CREDIT SCORE
-    # -----------------------------------------------------
-
-    def get_credit_score(self):
-
-        if self.store.exists(
-            "credit_score"
-        ):
-
-            return self.store.get(
-                "credit_score"
-            ).get(
-                "score",
-                750
-            )
-
-        return 750
-
-    # -----------------------------------------------------
+    # =====================================================
     # THEME
-    # -----------------------------------------------------
+    # =====================================================
 
-    def apply_theme(self):
+    def apply_saved_theme(self):
 
-        if self.theme == "Dark":
+        settings = self.store.get(
+            "settings"
+        )
 
-            Window.clearcolor = (
-                0.08,
-                0.08,
-                0.08,
-                1
+        theme = settings.get(
+            "theme",
+            "Blue"
+        )
+
+        self.set_theme(
+            theme,
+            show_popup=False
+        )
+
+    def set_theme(
+        self,
+        theme,
+        show_popup=True
+    ):
+
+        settings = self.store.get(
+            "settings"
+        )
+
+        language = settings.get(
+            "language",
+            "English"
+        )
+
+        credit_score = settings.get(
+            "demo_credit_score",
+            750
+        )
+
+        self.store.put(
+            "settings",
+            theme=theme,
+            language=language,
+            demo_credit_score=credit_score
+        )
+
+        if theme == "Dark":
+
+            Window.clearcolor = DARK_BLUE
+
+        elif theme == "Light":
+
+            Window.clearcolor = LIGHT_BG
+
+        else:
+
+            Window.clearcolor = WHITE
+
+        if show_popup:
+
+            show_message(
+                "Theme",
+                theme + " theme applied."
             )
 
-        elif self.theme == "Light":
+    # =====================================================
+    # LANGUAGE
+    # =====================================================
 
-            Window.clearcolor = (
-                0.95,
-                0.95,
-                0.95,
-                1
-            )
+    def set_language(self, language):
 
-        elif self.theme == "Blue":
+        settings = self.store.get(
+            "settings"
+        )
 
-            Window.clearcolor = (
-                0.04,
-                0.16,
-                0.32,
-                1
-            )
+        theme = settings.get(
+            "theme",
+            "Blue"
+        )
 
-    # -----------------------------------------------------
-    # REFRESH
-    # -----------------------------------------------------
+        credit_score = settings.get(
+            "demo_credit_score",
+            750
+        )
 
-    def refresh_all_screens(self):
+        self.store.put(
+            "settings",
+            theme=theme,
+            language=language,
+            demo_credit_score=credit_score
+        )
 
-        current = self.sm.current
-
-        for screen in self.sm.screens:
-
-            if hasattr(
-                screen,
-                "build_screen"
-            ):
-
-                try:
-                    screen.build_screen()
-                except Exception:
-                    pass
-
-        self.sm.current = current
+        show_message(
+            "Language",
+            language
+            + " selected.\n\n"
+            "Language changes complete karne ke liye "
+            "app restart karein."
+        )
 
 
 # =========================================================
-# START
+# RUN APP
 # =========================================================
 
 if __name__ == "__main__":
