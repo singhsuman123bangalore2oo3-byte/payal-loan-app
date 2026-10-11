@@ -67,41 +67,51 @@ def make_button(text, height=56, color=BLUE):
 
 
 def make_input(hint="", password=False):
-    return TextInput(
+    # High-contrast input fields: visible on white backgrounds and easy to tap.
+    field = TextInput(
         hint_text=hint,
         password=password,
         multiline=False,
-        size_hint_y=None,
-        height=dp(52),
+        size_hint=(1, None),
+        height=dp(54),
         font_size=sp(16),
-        padding=[dp(12), dp(12)],
+        padding=[dp(12), dp(14)],
         background_normal="",
-        background_color=WHITE,
-        foreground_color=BLACK
+        background_active="",
+        background_color=LIGHT_BG,
+        foreground_color=BLACK,
+        hint_text_color=(0.35, 0.39, 0.45, 1),
+        cursor_color=BLUE,
+        selection_color=LIGHT_BLUE,
+        write_tab=False,
     )
+    return field
 
 
 def make_label(text="", size=17, bold=False, color=WHITE):
+    """A wrapping label whose height follows its rendered text."""
     label = Label(
-        text=text,
+        text=str(text),
         font_size=sp(size),
         bold=bold,
         color=color,
-        size_hint_y=None,
-        height=dp(42),
+        size_hint=(1, None),
+        height=dp(max(42, size * 1.7)),
         halign="left",
-        valign="middle"
+        valign="top",
+        padding=(dp(6), dp(7)),
     )
 
-    label.bind(
-        width=lambda obj, value:
-        setattr(
-            obj,
-            "text_size",
-            (value - dp(10), None)
-        )
-    )
+    def refresh_layout(*_):
+        # Set text_size before asking Kivy to measure the wrapped text.
+        available_width = max(dp(100), label.width - dp(20))
+        label.text_size = (available_width, None)
+        label.texture_update()
+        label.height = max(dp(size * 1.7), label.texture_size[1] + dp(18))
 
+    label.bind(width=refresh_layout, text=refresh_layout, font_size=refresh_layout)
+    Clock.schedule_once(refresh_layout, 0)
+    Clock.schedule_once(refresh_layout, 0.1)
     return label
 
 
@@ -258,7 +268,7 @@ class BaseScreen(Screen):
         layout = BoxLayout(
             orientation="vertical",
             padding=[dp(16), dp(16)],
-            spacing=dp(10),
+            spacing=dp(14),
             size_hint_y=None
         )
 
@@ -291,8 +301,8 @@ class LoadingScreen(Screen):
 
         layout.add_widget(
             Label(
-                text="PAYAL LOAN",
-                font_size=sp(34),
+                text="Payal I Love You",
+                font_size=sp(30),
                 bold=True,
                 color=BLUE
             )
@@ -300,8 +310,8 @@ class LoadingScreen(Screen):
 
         layout.add_widget(
             Label(
-                text="Smart Loan & EMI",
-                font_size=sp(20),
+                text="PAYAL LOAN  |  Smart Loan & EMI",
+                font_size=sp(18),
                 color=GRAY
             )
         )
@@ -309,13 +319,13 @@ class LoadingScreen(Screen):
         self.add_widget(layout)
 
         Clock.schedule_once(
-            self.open_password,
-            1.2
+            self.open_home,
+            1.8
         )
 
-    def open_password(self, dt):
+    def open_home(self, dt):
 
-        App.get_running_app().sm.current = "password"
+        App.get_running_app().sm.current = "home"
 
 
 # =========================================================
@@ -450,23 +460,50 @@ class HomeScreen(BaseScreen):
 
         layout.add_widget(
             make_label(
-                "Welcome 👋",
+                "Welcome to Payal Loan",
                 20,
                 True,
                 BLACK
             )
         )
+        layout.add_widget(
+            make_label(
+                "Aapki Zaroorat, Hamara Saath",
+                16,
+                False,
+                GRAY
+            )
+        )
+        layout.add_widget(
+            make_label(
+                "Minimum Loan Amount: Rs. 1,000",
+                17,
+                True,
+                BLUE
+            )
+        )
+        layout.add_widget(
+            make_label(
+                "Apply for a loan, calculate EMI, and track your application from one place.",
+                16,
+                False,
+                BLACK
+            )
+        )
 
         buttons = [
-            ("💰 Loan Calculator", "loan"),
-            ("📝 Apply / Take Loan", "apply"),
-            ("📊 Credit Score", "credit"),
-            ("✅ Eligibility Test", "eligibility"),
-            ("📄 Loan Status", "status"),
-            ("👤 Profile", "profile"),
-            ("⚙ Settings", "settings"),
-            ("🔐 Change Password", "change_password"),
-            ("❓ Help / About", "help")
+            ("LOAN CALCULATOR", "loan"),
+            ("APPLY / TAKE LOAN", "apply"),
+            ("CREDIT SCORE", "credit"),
+            ("ELIGIBILITY TEST", "eligibility"),
+            ("LOAN STATUS", "status"),
+            ("MY PROFILE", "profile"),
+            ("SETTINGS", "settings"),
+            ("CHANGE PASSWORD", "change_password"),
+            ("HELP / ABOUT", "help"),
+            ("ADMIN PANEL", "admin"),
+            ("BANK DETAILS", "bank_details"),
+            ("LOGOUT", "loading")
         ]
 
         for text, screen_name in buttons:
@@ -504,7 +541,7 @@ class LoanScreen(BaseScreen):
 
         layout.add_widget(
             make_label(
-                "💰 LOAN CALCULATOR",
+                "LOAN CALCULATOR",
                 26,
                 True,
                 BLUE
@@ -526,10 +563,6 @@ class LoanScreen(BaseScreen):
             "Loan Amount (₹)"
         )
 
-        self.interest_input = make_input(
-            "Annual Interest (%)"
-        )
-
         self.months_input = make_input(
             "Loan Period (Months)"
         )
@@ -546,10 +579,11 @@ class LoanScreen(BaseScreen):
             self.amount_input
         )
 
-        layout.add_widget(
-            self.interest_input
+        self.interest_label = make_label(
+            "Admin-set annual interest: loading...",
+            17, True, BLACK
         )
-
+        layout.add_widget(self.interest_label)
         layout.add_widget(
             self.months_input
         )
@@ -580,7 +614,7 @@ class LoanScreen(BaseScreen):
         )
 
         apply_btn = make_button(
-            "📝 APPLY / TAKE LOAN",
+            "APPLY / TAKE LOAN",
             58,
             GREEN
         )
@@ -597,6 +631,16 @@ class LoanScreen(BaseScreen):
             layout,
             "home"
         )
+        self.refresh_admin_interest()
+
+    def on_pre_enter(self):
+        self.refresh_admin_interest()
+
+    def refresh_admin_interest(self):
+        app = App.get_running_app()
+        rate = app.store.get("settings").get("interest_rate", 12.0)
+        self.admin_interest_rate = float(rate)
+        self.interest_label.text = f"Admin-set annual interest: {self.admin_interest_rate:.2f}%"
 
     def calculate_emi(self, instance):
 
@@ -606,9 +650,7 @@ class LoanScreen(BaseScreen):
                 self.amount_input.text
             )
 
-            interest = float(
-                self.interest_input.text
-            )
+            interest = float(self.admin_interest_rate)
 
             months = int(
                 self.months_input.text
@@ -747,7 +789,7 @@ class ApplyLoanScreen(BaseScreen):
 
         layout.add_widget(
             make_label(
-                "📝 APPLY / TAKE LOAN",
+                "APPLY / TAKE LOAN",
                 26,
                 True,
                 BLUE
@@ -765,6 +807,9 @@ class ApplyLoanScreen(BaseScreen):
         self.pan_input = make_input(
             "PAN Card Number"
         )
+        self.bank_holder_input = make_input("Bank Account Holder Name")
+        self.account_input = make_input("Bank Account Number")
+        self.ifsc_input = make_input("IFSC Code")
 
         self.amount_input = make_input(
             "Loan Amount (₹)"
@@ -788,6 +833,9 @@ class ApplyLoanScreen(BaseScreen):
         layout.add_widget(
             self.pan_input
         )
+        layout.add_widget(self.bank_holder_input)
+        layout.add_widget(self.account_input)
+        layout.add_widget(self.ifsc_input)
 
         layout.add_widget(
             self.amount_input
@@ -908,6 +956,13 @@ class ApplyLoanScreen(BaseScreen):
 
             return
 
+        bank_holder = self.bank_holder_input.text.strip()
+        account_number = self.account_input.text.strip()
+        ifsc = self.ifsc_input.text.strip().upper()
+        if not bank_holder or not account_number or not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", ifsc):
+            show_message("Bank Details", "Bank holder name, account number aur valid IFSC enter karein.")
+            return
+
         if not hasattr(
             self,
             "loan_data"
@@ -945,6 +1000,10 @@ class ApplyLoanScreen(BaseScreen):
 
             "pan":
                 pan,
+            "bank_holder": bank_holder,
+            "account_number": account_number,
+            "ifsc": ifsc,
+            "payment_status": "NOT_PAID",
 
             "amount":
                 amount,
@@ -1028,7 +1087,7 @@ class CreditScoreScreen(BaseScreen):
 
         layout.add_widget(
             make_label(
-                "📊 CREDIT SCORE",
+                "CREDIT SCORE",
                 26,
                 True,
                 BLUE
@@ -1351,6 +1410,10 @@ class LoanStatusScreen(BaseScreen):
                     )
                 )
                 + " Months"
+                + "\n\n"
+                "Bank Account: " + str(loan.get("account_number", "-"))
+                + "\nIFSC: " + str(loan.get("ifsc", "-"))
+                + "\nPayment Status: " + str(loan.get("payment_status", "NOT_PAID"))
                 + "\n\n"
                 "Status: "
                 + str(
@@ -1778,7 +1841,7 @@ class HelpScreen(BaseScreen):
 
         layout.add_widget(
             make_label(
-                "❓ HELP / ABOUT",
+                "ABOUT PAYAL LOAN",
                 26,
                 True,
                 BLUE
@@ -1821,6 +1884,197 @@ class HelpScreen(BaseScreen):
         )
 
 
+
+# =========================================================
+# ADMIN PANEL
+# =========================================================
+class AdminScreen(BaseScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.layout = self.build_scroll()
+        self.build_ui()
+
+    def build_ui(self):
+        self.layout.clear_widgets()
+        self.layout.add_widget(make_label("ADMIN PANEL", 26, True, BLUE))
+        self.admin_password_input = make_input("Admin password", True)
+        self.layout.add_widget(self.admin_password_input)
+        login_btn = make_button("ADMIN LOGIN", 54, BLUE)
+        self.layout.add_widget(login_btn)
+        login_btn.bind(on_release=self.admin_login)
+        add_back_button(self.layout, "home")
+
+    def admin_login(self, instance):
+        app = App.get_running_app()
+        settings = app.store.get("settings")
+        expected = settings.get("admin_password", "2468")
+        if self.admin_password_input.text != expected:
+            show_message("Admin Login", "Admin password galat hai.")
+            return
+        self.show_admin_controls()
+
+    def show_admin_controls(self):
+        self.layout.clear_widgets()
+        app = App.get_running_app()
+        settings = app.store.get("settings")
+        self.layout.add_widget(make_label("ADMIN SETTINGS", 25, True, BLUE))
+        self.rate_input = make_input("Annual interest rate (%)")
+        self.rate_input.text = str(settings.get("interest_rate", 12.0))
+        self.new_admin_password = make_input("New admin password (optional)", True)
+        self.layout.add_widget(make_label("Interest rate used by all customer EMI calculations", 16, False, BLACK))
+        self.layout.add_widget(self.rate_input)
+        self.layout.add_widget(self.new_admin_password)
+        save = make_button("SAVE ADMIN SETTINGS", 56, GREEN)
+        self.layout.add_widget(save)
+        save.bind(on_release=self.save_admin_settings)
+        self.layout.add_widget(make_label("Loan application review", 20, True, BLUE))
+        if app.store.exists("loan"):
+            loan = app.store.get("loan")
+            summary = f"ID: {loan.get('application_id','-')}\nName: {loan.get('name','-')}\nAmount: ₹{float(loan.get('amount',0)):,.2f}\nBank holder: {loan.get('bank_holder','-')}\nAccount: {loan.get('account_number','-')}\nIFSC: {loan.get('ifsc','-')}\nStatus: {loan.get('status','-')}\nPayment: {loan.get('payment_status','NOT_PAID')}"
+            if loan.get("transfer_utr"):
+                summary += f"\nTransferred: ₹{float(loan.get('transfer_amount', 0)):,.2f}\nUTR: {loan.get('transfer_utr')}\nTransfer date: {loan.get('transfer_date', '-')}"
+            # Give the full application details enough vertical space. The old
+            # fixed-height label clipped multi-line text and let buttons overlap it.
+            details = Label(
+                text=summary,
+                font_size=sp(16),
+                color=BLACK,
+                size_hint=(1, None),
+                height=dp(190),
+                halign="left",
+                valign="top",
+                padding=(dp(10), dp(10)),
+            )
+            details.bind(
+                width=lambda obj, value: setattr(
+                    obj, "text_size", (max(0, value - dp(20)), None)
+                )
+            )
+            details.bind(
+                texture_size=lambda obj, value: setattr(
+                    obj, "height", max(dp(190), value[1] + dp(24))
+                )
+            )
+            self.layout.add_widget(details)
+            approve = make_button("APPROVE APPLICATION", 52, GREEN)
+            reject = make_button("REJECT APPLICATION", 52, RED)
+            self.layout.add_widget(approve)
+            self.layout.add_widget(reject)
+            approve.bind(on_release=lambda *_: self.update_loan(status="APPROVED"))
+            reject.bind(on_release=lambda *_: self.update_loan(status="REJECTED"))
+
+            # Manual money-distribution record: transfer is made separately
+            # using the Admin's bank app; this section only records that transfer.
+            self.layout.add_widget(make_label("MANUAL MONEY DISTRIBUTION", 20, True, BLUE))
+            self.layout.add_widget(make_label(
+                "Bank app se transfer karne ke baad hi neeche details bharein.",
+                15, False, BLACK
+            ))
+            self.transfer_amount_input = make_input("Transferred amount (₹)")
+            self.transfer_amount_input.text = str(float(loan.get("amount", 0)))
+            self.transfer_utr_input = make_input("UTR / Transaction ID")
+            self.transfer_date_input = make_input("Transfer date (YYYY-MM-DD)")
+            from datetime import date
+            self.transfer_date_input.text = date.today().isoformat()
+            self.layout.add_widget(make_label("Transfer amount", 15, True, BLACK))
+            self.layout.add_widget(self.transfer_amount_input)
+            self.layout.add_widget(make_label("UTR / Transaction ID", 15, True, BLACK))
+            self.layout.add_widget(self.transfer_utr_input)
+            self.layout.add_widget(make_label("Transfer date", 15, True, BLACK))
+            self.layout.add_widget(self.transfer_date_input)
+            paid = make_button("SAVE TRANSFER RECORD / MARK PAID", 52, BLUE)
+            self.layout.add_widget(paid)
+            paid.bind(on_release=self.record_manual_transfer)
+        else:
+            self.layout.add_widget(make_label("No loan application submitted yet.", 16, False, BLACK))
+        self.layout.add_widget(make_label("Admin UPI ID: 9693387758@slc (for receiving payments only)", 16, True, BLUE))
+        add_back_button(self.layout, "home")
+
+    def save_admin_settings(self, instance):
+        app = App.get_running_app()
+        try:
+            rate = float(self.rate_input.text.strip())
+            if not 0 <= rate <= 100:
+                raise ValueError
+        except ValueError:
+            show_message("Interest Rate", "Rate 0 se 100 ke beech enter karein.")
+            return
+        old = app.store.get("settings")
+        data = dict(old)
+        data["interest_rate"] = rate
+        if self.new_admin_password.text:
+            if len(self.new_admin_password.text) < 4:
+                show_message("Admin Password", "Password kam se kam 4 characters ka ho.")
+                return
+            data["admin_password"] = self.new_admin_password.text
+        app.store.put("settings", **data)
+        show_message("Saved", "Admin settings save ho gayi.")
+        self.show_admin_controls()
+
+    def update_loan(self, **changes):
+        app = App.get_running_app()
+        if not app.store.exists("loan"):
+            show_message("Loan", "Application nahi mili.")
+            return
+        loan = dict(app.store.get("loan"))
+        loan.update(changes)
+        app.store.put("loan", **loan)
+        show_message("Loan Updated", "Application record update ho gaya.")
+        self.show_admin_controls()
+
+    def record_manual_transfer(self, instance):
+        app = App.get_running_app()
+        if not app.store.exists("loan"):
+            show_message("Transfer", "Loan application nahi mili.")
+            return
+        loan = dict(app.store.get("loan"))
+        if loan.get("status") != "APPROVED":
+            show_message("Transfer", "Pehle application approve karein.")
+            return
+        try:
+            amount = float(self.transfer_amount_input.text.strip())
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, AttributeError):
+            show_message("Transfer", "Sahi transferred amount enter karein.")
+            return
+        utr = self.transfer_utr_input.text.strip()
+        transfer_date = self.transfer_date_input.text.strip()
+        if not utr:
+            show_message("Transfer", "UTR / Transaction ID zaroor bharein.")
+            return
+        try:
+            from datetime import date
+            date.fromisoformat(transfer_date)
+        except ValueError:
+            show_message("Transfer Date", "Date YYYY-MM-DD format mein bharein.")
+            return
+        loan.update({
+            "payment_status": "PAID",
+            "transfer_amount": round(amount, 2),
+            "transfer_utr": utr,
+            "transfer_date": transfer_date,
+            "payment_method": "MANUAL_BANK_TRANSFER"
+        })
+        app.store.put("loan", **loan)
+        show_message("Transfer Saved", "Manual transfer record save ho gaya. Bank transfer apne bank app mein alag se karna hota hai.")
+        self.show_admin_controls()
+
+
+# =========================================================
+# BANK DETAILS SCREEN
+# =========================================================
+class BankDetailsScreen(BaseScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        layout = self.build_scroll()
+        layout.add_widget(make_label("BANK DETAILS", 26, True, BLUE))
+        layout.add_widget(make_label("Customer bank details are collected with the loan application and shown only in the Admin Panel on this device.", 17, False, BLACK))
+        layout.add_widget(make_label("Admin UPI ID: 9693387758@slc", 20, True, BLUE))
+        layout.add_widget(make_label("UPI ID is for receiving money. To disburse a loan, manually transfer from your bank app to the customer's verified account and then mark the record Paid in Admin Panel.", 16, False, BLACK))
+        add_back_button(layout, "home")
+
+
 # =========================================================
 # MAIN APP
 # =========================================================
@@ -1856,8 +2110,16 @@ class LoanApp(App):
                 "settings",
                 theme="Blue",
                 language="English",
-                demo_credit_score=750
+                demo_credit_score=750,
+                interest_rate=12.0,
+                admin_password="2468"
             )
+        else:
+            saved_settings = self.store.get("settings")
+            settings_data = dict(saved_settings)
+            settings_data.setdefault("interest_rate", 12.0)
+            settings_data.setdefault("admin_password", "2468")
+            self.store.put("settings", **settings_data)
 
         self.sm = ScreenManager(
             transition=FadeTransition(
@@ -1937,6 +2199,8 @@ class LoanApp(App):
                 name="help"
             )
         )
+        self.sm.add_widget(AdminScreen(name="admin"))
+        self.sm.add_widget(BankDetailsScreen(name="bank_details"))
 
         self.sm.current = "loading"
 
@@ -1984,12 +2248,13 @@ class LoanApp(App):
             750
         )
 
-        self.store.put(
-            "settings",
-            theme=theme,
-            language=language,
-            demo_credit_score=credit_score
-        )
+        saved = dict(settings)
+        saved["theme"] = theme
+        saved["language"] = language
+        saved["demo_credit_score"] = credit_score
+        saved.setdefault("interest_rate", 12.0)
+        saved.setdefault("admin_password", "2468")
+        self.store.put("settings", **saved)
 
         if theme == "Dark":
 
@@ -2030,12 +2295,13 @@ class LoanApp(App):
             750
         )
 
-        self.store.put(
-            "settings",
-            theme=theme,
-            language=language,
-            demo_credit_score=credit_score
-        )
+        saved = dict(settings)
+        saved["theme"] = theme
+        saved["language"] = language
+        saved["demo_credit_score"] = credit_score
+        saved.setdefault("interest_rate", 12.0)
+        saved.setdefault("admin_password", "2468")
+        self.store.put("settings", **saved)
 
         show_message(
             "Language",
